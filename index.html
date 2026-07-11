@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>delicate — a forest listening experience</title>
+<meta name="description" content="Wander a redwood forest while the album plays from the sky.">
+<style>
+  :root { --ink:#e8e4da; --dim:#9a968c; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html,body { height:100%; overflow:hidden; background:#0b0f0c; font-family:Georgia,'Times New Roman',serif; color:var(--ink); }
+  canvas { display:block; }
+
+  /* ---------- landing ---------- */
+  #landing {
+    position:fixed; inset:0; z-index:30; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; text-align:center; gap:22px;
+    background:radial-gradient(ellipse at 50% 110%, #14261a 0%, #0b0f0c 60%, #060807 100%);
+    transition:opacity 1.6s ease; padding:24px;
+  }
+  #landing.gone { opacity:0; pointer-events:none; }
+  #landing svg { width:min(46vw,210px); height:auto; opacity:.9; }
+  #artist { font-size:14px; letter-spacing:.42em; text-transform:uppercase; color:var(--dim); }
+  #album { font-size:clamp(26px,5vw,44px); font-style:italic; letter-spacing:.04em; }
+  #enter {
+    margin-top:10px; padding:14px 44px; font:inherit; font-size:16px; letter-spacing:.28em;
+    text-transform:uppercase; color:var(--ink); background:transparent;
+    border:1px solid rgba(232,228,218,.45); border-radius:2px; cursor:pointer;
+    transition:background .4s,border-color .4s;
+  }
+  #enter:hover { background:rgba(232,228,218,.08); border-color:rgba(232,228,218,.9); }
+  #hint { font-size:12.5px; color:var(--dim); letter-spacing:.08em; line-height:1.9; font-family:Verdana,sans-serif; max-width:520px; }
+  #hint b { color:var(--ink); font-weight:normal; }
+
+  /* ---------- hud ---------- */
+  #hud { position:fixed; inset:0; z-index:20; pointer-events:none; opacity:0; transition:opacity 2s; }
+  #hud.on { opacity:1; }
+  #nowplaying {
+    position:absolute; left:26px; bottom:22px; max-width:70vw;
+    font-size:15px; letter-spacing:.06em; text-shadow:0 1px 6px rgba(0,0,0,.8);
+    opacity:.45; transition:opacity .8s;
+  }
+  #nowplaying.fresh { opacity:1; }
+  #nowplaying .t { font-style:italic; font-size:18px; }
+  #nowplaying .a { font-size:11.5px; letter-spacing:.3em; text-transform:uppercase; color:var(--dim); margin-top:4px; font-family:Verdana,sans-serif; }
+  #buttons { position:absolute; right:18px; bottom:18px; display:flex; gap:10px; pointer-events:auto; }
+  #buttons button {
+    width:42px; height:42px; border-radius:50%; border:1px solid rgba(232,228,218,.3);
+    background:rgba(10,14,11,.45); color:var(--ink); font-size:15px; cursor:pointer;
+    backdrop-filter:blur(4px); transition:border-color .3s;
+  }
+  #buttons button:hover { border-color:rgba(232,228,218,.8); }
+  #toast {
+    position:absolute; top:24px; left:50%; transform:translateX(-50%);
+    font-size:12.5px; font-family:Verdana,sans-serif; letter-spacing:.14em; color:var(--dim);
+    text-shadow:0 1px 4px #000; opacity:0; transition:opacity .6s; white-space:nowrap;
+  }
+  #toast.on { opacity:1; }
+
+  /* ---------- pause ---------- */
+  #pause {
+    position:fixed; inset:0; z-index:25; display:none; align-items:center; justify-content:center;
+    flex-direction:column; gap:16px; background:rgba(6,9,7,.55); backdrop-filter:blur(3px); text-align:center;
+  }
+  #pause.on { display:flex; }
+  #pause h2 { font-weight:normal; font-style:italic; font-size:26px; letter-spacing:.06em; }
+  #pause p { font-size:12.5px; font-family:Verdana,sans-serif; color:var(--dim); letter-spacing:.1em; line-height:2; }
+
+  /* ---------- mobile joystick ---------- */
+  #stick { position:fixed; z-index:22; width:110px; height:110px; border-radius:50%;
+    border:1.5px solid rgba(232,228,218,.25); background:rgba(10,14,11,.18); display:none; pointer-events:none; }
+  #knob { position:absolute; left:50%; top:50%; width:44px; height:44px; margin:-22px 0 0 -22px;
+    border-radius:50%; background:rgba(232,228,218,.28); }
+</style>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/",
+    "@sparkjsdev/spark": "https://sparkjs.dev/releases/spark/2.1.0/spark.module.js"
+  }
+}
+</script>
+</head>
+<body>
+
+<div id="landing">
+  <svg viewBox="0 0 200 200" aria-hidden="true">
+    <circle cx="100" cy="100" r="97" fill="none" stroke="#e8e4da" stroke-opacity=".35" stroke-width="1"/>
+    <g stroke="#e8e4da" stroke-opacity=".8" stroke-width="2.5" stroke-linecap="round">
+      <line x1="70"  y1="168" x2="70"  y2="52"/>
+      <line x1="104" y1="168" x2="104" y2="30"/>
+      <line x1="136" y1="168" x2="136" y2="66"/>
+    </g>
+    <g fill="#e8e4da" fill-opacity=".55">
+      <polygon points="70,38 60,62 80,62"/><polygon points="70,52 58,80 82,80"/>
+      <polygon points="104,16 92,44 116,44"/><polygon points="104,32 90,64 118,64"/>
+      <polygon points="136,52 126,76 146,76"/><polygon points="136,66 124,92 148,92"/>
+    </g>
+    <line x1="30" y1="168" x2="170" y2="168" stroke="#e8e4da" stroke-opacity=".5" stroke-width="1.5"/>
+  </svg>
+  <div>
+    <div id="artist">Charlie Powers</div>
+    <div id="album">delicate</div>
+  </div>
+  <button id="enter">Enter the forest</button>
+  <div id="hint">
+    <span class="desktop-hint"><b>WASD</b> wander &nbsp;·&nbsp; <b>mouse</b> look &nbsp;·&nbsp; <b>shift</b> run<br>
+    <b>N</b> next song &nbsp;·&nbsp; <b>M</b> mute &nbsp;·&nbsp; <b>esc</b> pause</span>
+    <span class="mobile-hint" style="display:none">left thumb to walk &nbsp;·&nbsp; right thumb to look</span><br>
+    headphones recommended
+  </div>
+</div>
+
+<div id="hud">
+  <div id="nowplaying"><div class="t"></div><div class="a"></div></div>
+  <div id="buttons">
+    <button id="btn-next" title="next song">&#9197;</button>
+    <button id="btn-mute" title="mute">&#9834;</button>
+    <button id="btn-full" title="fullscreen">&#x26F6;</button>
+  </div>
+  <div id="toast"></div>
+</div>
+
+<div id="pause">
+  <h2>paused</h2>
+  <p>click anywhere to return to the forest<br>N next song · M mute</p>
+</div>
+
+<div id="stick"><div id="knob"></div></div>
+
+<script type="module">
+import * as THREE from "three";
+
+/* ================================================================
+   CONFIG — everything you'd ever edit lives here.
+   ================================================================ */
+const CONFIG = {
+  ARTIST: "Charlie Powers",
+  ALBUM:  "delicate",
+
+  // Album tracks, in order (flat filenames — GitHub's uploader doesn't keep subfolders).
+  // Leave empty [] to hear the built-in placeholder ambience.
+  TRACKS: [
+    { title: "be nice",              url: "01-be-nice.mp3" },
+    { title: "conversation",         url: "02-conversation.mp3" },
+    { title: "little heart of mine", url: "03-little-heart-of-mine.mp3" },
+    { title: "change for you",       url: "04-change-for-you.mp3" },
+    { title: "talk is cheap",        url: "05-talk-is-cheap.mp3" },
+    { title: "say it",               url: "06-say-it.mp3" },
+    { title: "fool's gold",          url: "07-fools-gold.mp3" },
+    { title: "save me",              url: "08-save-me.mp3" },
+  ],
+
+  // Gaussian splat of the real forest. Set to a .spz/.ply/.splat/.ksplat URL
+  // when ready and it replaces the stylized forest automatically.
+  SPLAT_URL: null,                  // e.g. "forest.spz"
+  SPLAT_POSITION: [0, 0, 0],
+  SPLAT_ROTATION: [Math.PI, 0, 0],  // most splats need this X-flip
+  SPLAT_SCALE: 1,
+  KEEP_PROCEDURAL_WITH_SPLAT: false, // true = blend stylized trees around your splat
+
+  SEED: 20260711,                   // forest layout seed — same forest for everyone
+  BOUNDS: 150,                      // how far you can wander (m)
+  MUSIC_VOLUME: 0.9,
+};
+
+/* ---------------- tiny seeded rng ---------------- */
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const rand = mulberry32(CONFIG.SEED);
+const R = (lo,hi)=>lo+rand()*(hi-lo);
+
+const isTouch = matchMedia("(pointer:coarse)").matches || "ontouchstart" in window;
+if (isTouch){
+  document.querySelector(".desktop-hint").style.display = "none";
+  document.querySelector(".mobile-hint").style.display = "";
+}
+
+/* ================================================================
+   RENDERER / SCENE
+   ================================================================ */
+const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:"high-performance" });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.08;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const FOG_COLOR = new THREE.Color(0x9fae9a);
+scene.fog = new THREE.FogExp2(FOG_COLOR, 0.0105);
+
+const camera = new THREE.PerspectiveCamera(66, innerWidth/innerHeight, 0.1, 900);
+const EYE = 1.7;
+camera.position.set(0, EYE, 14);
+
+scene.add(new THREE.HemisphereLight(0xcfe0d4, 0x40342a, 1.0));
+const SUN_DIR = new THREE.Vector3(0.35, 0.72, -0.55).normalize();
+const sun = new THREE.DirectionalLight(0xffe9c4, 1.35);
+sun.position.copy(SUN_DIR).multiplyScalar(120);
+scene.add(sun);
+
+/* ================================================================
+   CANVAS TEXTURES (no external art assets — everything is drawn)
+   ================================================================ */
+function canvasTex(w,h,draw,repeat){
+  const c=document.createElement("canvas"); c.width=w; c.height=h;
+  draw(c.getContext("2d"),w,h);
+  const t=new THREE.CanvasTexture(c);
+  t.colorSpace=THREE.SRGBColorSpace;
+  if(repeat){t.wrapS=t.wrapT=THREE.RepeatWrapping;}
+  return t;
+}
+
+const barkTex = canvasTex(256,512,(g,w,h)=>{
+  g.fillStyle="#5d4030"; g.fillRect(0,0,w,h);
+  for(let i=0;i<900;i++){                       // fibrous vertical striations
+    const x=rand()*w, y=rand()*h, len=R(20,120), wd=R(1,4);
+    const v=rand();
+    g.fillStyle = v<.45?`rgba(43,28,20,${R(.25,.6)})`
+               : v<.8 ?`rgba(122,82,60,${R(.2,.5)})`
+                      :`rgba(150,105,80,${R(.15,.35)})`;
+    g.fillRect(x,y,wd,len);
+  }
+},true);
+barkTex.repeat.set(2,6);
+
+const foliageTex = canvasTex(256,256,(g)=>{     // soft needle-cloud blob
+  g.clearRect(0,0,256,256);
+  for(let i=0;i<340;i++){
+    const a=rand()*Math.PI*2, r=Math.pow(rand(),0.5)*104;
+    const x=128+Math.cos(a)*r, y=128+Math.sin(a)*r*0.82;
+    const rad=R(6,26), v=R(0,1);
+    const gr=g.createRadialGradient(x,y,0,x,y,rad);
+    const col=v<.6?"26,52,32":v<.9?"35,66,38":"52,84,46";
+    gr.addColorStop(0,`rgba(${col},${R(.5,.9)})`); gr.addColorStop(1,`rgba(${col},0)`);
+    g.fillStyle=gr; g.beginPath(); g.arc(x,y,rad,0,7); g.fill();
+  }
+});
+
+const fernTex = canvasTex(256,256,(g)=>{        // sword-fern silhouette
+  g.clearRect(0,0,256,256);
+  const fronds=9;
+  for(let f=0;f<fronds;f++){
+    const a=-Math.PI/2 + (f-(fronds-1)/2)*0.32, len=R(88,120);
+    g.save(); g.translate(128,244); g.rotate(a);
+    g.strokeStyle=`rgba(30,64,34,.95)`; g.lineWidth=3;
+    g.beginPath(); g.moveTo(0,0); g.quadraticCurveTo(len*.1,-len*.55,len*.16,-len); g.stroke();
+    for(let l=0;l<16;l++){                       // leaflets
+      const t=l/16, y=-t*len, x=len*.14*t;
+      const ll=(1-t*.75)*16;
+      g.strokeStyle=`rgba(${38+t*30},${78+t*30},${40+t*20},.9)`; g.lineWidth=4.5;
+      g.beginPath(); g.moveTo(x,y); g.lineTo(x-ll,y-ll*.36); g.moveTo(x,y); g.lineTo(x+ll,y-ll*.36); g.stroke();
+    }
+    g.restore();
+  }
+});
+
+const groundTex = canvasTex(512,512,(g,w,h)=>{  // duff: needles, soil, moss
+  g.fillStyle="#3a2e21"; g.fillRect(0,0,w,h);
+  for(let i=0;i<2600;i++){
+    const v=rand();
+    g.fillStyle = v<.4?`rgba(66,50,32,${R(.3,.7)})`
+               : v<.7?`rgba(46,38,24,${R(.3,.7)})`
+               : v<.88?`rgba(84,66,40,${R(.2,.5)})`
+                     :`rgba(52,74,42,${R(.15,.4)})`;   // moss flecks
+    g.save(); g.translate(rand()*w,rand()*h); g.rotate(rand()*Math.PI);
+    g.fillRect(0,0,R(4,16),R(1,2.5)); g.restore();
+  }
+},true);
+groundTex.repeat.set(48,48);
+
+const rayTex = canvasTex(64,256,(g,w,h)=>{      // vertical light-shaft gradient
+  const gr=g.createLinearGradient(0,0,0,h);
+  gr.addColorStop(0,"rgba(255,244,214,.85)"); gr.addColorStop(.75,"rgba(255,244,214,.25)");
+  gr.addColorStop(1,"rgba(255,244,214,0)");
+  g.fillStyle=gr; g.fillRect(0,0,w,h);
+});
+
+const moteTex = canvasTex(32,32,(g)=>{
+  const gr=g.createRadialGradient(16,16,0,16,16,15);
+  gr.addColorStop(0,"rgba(255,248,225,1)"); gr.addColorStop(1,"rgba(255,248,225,0)");
+  g.fillStyle=gr; g.beginPath(); g.arc(16,16,15,0,7); g.fill();
+});
+
+/* ================================================================
+   SKY
+   ================================================================ */
+const sky = new THREE.Mesh(
+  new THREE.SphereGeometry(600,24,16),
+  new THREE.ShaderMaterial({
+    side:THREE.BackSide, depthWrite:false, fog:false,
+    uniforms:{ sunDir:{value:SUN_DIR} },
+    vertexShader:`varying vec3 vDir; void main(){ vDir=normalize(position);
+      gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+    fragmentShader:`varying vec3 vDir; uniform vec3 sunDir;
+      void main(){
+        float up=max(vDir.y,0.0);
+        vec3 zen=vec3(0.62,0.72,0.78), hor=vec3(0.86,0.84,0.72);
+        vec3 col=mix(hor,zen,pow(up,0.55));
+        float s=max(dot(vDir,sunDir),0.0);
+        col+=vec3(1.0,0.88,0.6)*(pow(s,180.0)*0.9+pow(s,7.0)*0.22);
+        col=mix(vec3(0.624,0.682,0.604),col,smoothstep(0.0,0.12,vDir.y)); // fog-match horizon
+        gl_FragColor=vec4(col,1.0);
+      }`
+  })
+);
+scene.add(sky);
+
+/* ================================================================
+   GROUND
+   ================================================================ */
+const ground = new THREE.Mesh(
+  new THREE.CircleGeometry(520,48),
+  new THREE.MeshStandardMaterial({ map:groundTex, color:0xb0a290, roughness:1 })
+);
+ground.rotation.x=-Math.PI/2; scene.add(ground);
+
+/* ================================================================
+   FOREST  (procedural stand-in until the real splat arrives)
+   ================================================================ */
+const forest = new THREE.Group(); scene.add(forest);
+const trees = [];                 // {x,z,r} for collision
+
+{
+  const N=170, MINR=560; // MINR = squared min spacing
+  outer: for(let i=0;i<N*30 && trees.length<N;i++){
+    const a=rand()*Math.PI*2, d=18+Math.pow(rand(),0.62)*175;
+    const x=Math.cos(a)*d, z=Math.sin(a)*d;
+    if(Math.hypot(x,z)<9) continue;                       // clearing at spawn
+    for(const t of trees) if((t.x-x)**2+(t.z-z)**2<MINR) continue outer;
+    trees.push({x,z,h:R(46,88),r:R(0.9,2.1),tint:R(.8,1.15)});
+  }
+
+  // trunks
+  const trunkGeo=new THREE.CylinderGeometry(0.62,1,1,9,1);
+  trunkGeo.translate(0,0.5,0);
+  const trunkMat=new THREE.MeshStandardMaterial({ map:barkTex, roughness:.95 });
+  const trunks=new THREE.InstancedMesh(trunkGeo,trunkMat,trees.length);
+  // root flares
+  const flareGeo=new THREE.CylinderGeometry(0.85,1.6,1,9,1); flareGeo.translate(0,0.5,0);
+  const flares=new THREE.InstancedMesh(flareGeo,trunkMat,trees.length);
+  // canopy clouds
+  const cone=new THREE.ConeGeometry(1,1.6,7); cone.translate(0,0.8,0);
+  const canopyMat=new THREE.MeshStandardMaterial({ color:0x22422a, roughness:1, flatShading:true });
+  const CPT=4;
+  const canopy=new THREE.InstancedMesh(cone,canopyMat,trees.length*CPT);
+
+  const M=new THREE.Matrix4(), Q=new THREE.Quaternion(), S=new THREE.Vector3(), P=new THREE.Vector3();
+  const CU=new THREE.Color(); let ci=0;
+  trees.forEach((t,i)=>{
+    const lean=R(-.02,.02);
+    Q.setFromEuler(new THREE.Euler(lean,R(0,6.28),R(-.02,.02)));
+    M.compose(P.set(t.x,0,t.z),Q,S.set(t.r,t.h,t.r)); trunks.setMatrixAt(i,M);
+    trunks.setColorAt(i,CU.setRGB(t.tint*1.05,t.tint*.88,t.tint*.74));
+    M.compose(P.set(t.x,0,t.z),Q,S.set(t.r*1.35,t.r*3.2,t.r*1.35)); flares.setMatrixAt(i,M);
+    flares.setColorAt(i,CU.setRGB(t.tint*1.05,t.tint*.88,t.tint*.74));
+    for(let c=0;c<CPT;c++){
+      const f=0.62+0.115*c+R(-.02,.02);              // foliage lives high up the column
+      const rad=t.r*R(2.4,3.8)*(1.15-0.14*c);
+      Q.setFromEuler(new THREE.Euler(R(-.12,.12),R(0,6.28),R(-.12,.12)));
+      M.compose(P.set(t.x+R(-1,1),t.h*f,t.z+R(-1,1)),Q,S.set(rad,t.h*0.17,rad));
+      canopy.setMatrixAt(ci,M);
+      canopy.setColorAt(ci,CU.setHSL(0.33+R(-.02,.02),R(.28,.42),R(.16,.26)));
+      ci++;
+    }
+  });
+  forest.add(trunks,flares,canopy);
+
+  // high canopy sheet — broken cover when you look up
+  const sheetMat=new THREE.MeshBasicMaterial({ map:foliageTex, transparent:true, opacity:.92,
+    depthWrite:false, side:THREE.DoubleSide, color:0x64775f });
+  const sheetGeo=new THREE.PlaneGeometry(1,1);
+  const sheets=new THREE.InstancedMesh(sheetGeo,sheetMat,130);
+  for(let i=0;i<130;i++){
+    const t=trees[Math.floor(rand()*trees.length)];
+    const s=R(16,36);
+    Q.setFromEuler(new THREE.Euler(-Math.PI/2+R(-.25,.25),R(0,6.28),0));
+    M.compose(P.set(t.x+R(-8,8),R(42,66),t.z+R(-8,8)),Q,S.set(s,s,1));
+    sheets.setMatrixAt(i,M);
+  }
+  forest.add(sheets);
+
+  // ferns
+  const fernMat=new THREE.MeshLambertMaterial({ map:fernTex, transparent:true, alphaTest:.35,
+    side:THREE.DoubleSide, color:0xb9c4a4 });
+  const fernGeo=new THREE.PlaneGeometry(1,1); fernGeo.translate(0,0.5,0);
+  const FN=1100, ferns=new THREE.InstancedMesh(fernGeo,fernMat,FN*2);
+  for(let i=0;i<FN;i++){
+    const a=rand()*Math.PI*2, d=5+Math.pow(rand(),0.8)*185;
+    const x=Math.cos(a)*d, z=Math.sin(a)*d, s=R(1.2,3.0), rot=R(0,6.28);
+    for(let k=0;k<2;k++){                          // crossed planes
+      Q.setFromEuler(new THREE.Euler(0,rot+k*Math.PI/2,0));
+      M.compose(P.set(x,0,z),Q,S.set(s,s*.75,1));
+      ferns.setMatrixAt(i*2+k,M);
+    }
+  }
+  forest.add(ferns);
+
+  // fallen logs
+  const logMat=new THREE.MeshStandardMaterial({ map:barkTex, roughness:1, color:0x9a8a76 });
+  for(let i=0;i<7;i++){
+    const len=R(14,30), rad=R(.8,1.5);
+    const log=new THREE.Mesh(new THREE.CylinderGeometry(rad*.8,rad,len,8),logMat);
+    const a=rand()*Math.PI*2, d=R(20,150);
+    log.position.set(Math.cos(a)*d,rad*.62,Math.sin(a)*d);
+    log.rotation.set(R(-.06,.06),0,Math.PI/2+R(-.2,.2)); log.rotation.y=rand()*Math.PI;
+    forest.add(log);
+    trees.push({x:log.position.x,z:log.position.z,r:2.2});  // rough collision
+  }
+
+  // baked tree-base shadow blobs
+  const blob=document.createElement("canvas"); blob.width=blob.height=1024;
+  const bg=blob.getContext("2d"); const W2=520;
+  trees.forEach(t=>{
+    const u=(t.x/W2/2+0.5)*1024, v=(t.z/W2/2+0.5)*1024, rr=(t.r||1.5)*10;
+    const gr=bg.createRadialGradient(u,v,0,u,v,rr);
+    gr.addColorStop(0,"rgba(0,0,0,.5)"); gr.addColorStop(1,"rgba(0,0,0,0)");
+    bg.fillStyle=gr; bg.beginPath(); bg.arc(u,v,rr,0,7); bg.fill();
+  });
+  const blobT=new THREE.CanvasTexture(blob);
+  const shadowPlane=new THREE.Mesh(new THREE.PlaneGeometry(W2*2,W2*2),
+    new THREE.MeshBasicMaterial({ map:blobT, transparent:true, depthWrite:false }));
+  shadowPlane.rotation.x=-Math.PI/2; shadowPlane.position.y=0.03; scene.add(shadowPlane);
+}
+
+/* ---------------- god rays ---------------- */
+const rays=[];
+{
+  const rayMat=new THREE.MeshBasicMaterial({ map:rayTex, transparent:true, opacity:.06,
+    blending:THREE.AdditiveBlending, depthWrite:false, side:THREE.DoubleSide, fog:false });
+  for(let i=0;i<26;i++){
+    const h=R(55,85), w=R(3,9);
+    const m=new THREE.Mesh(new THREE.PlaneGeometry(w,h),rayMat.clone());
+    const a=rand()*Math.PI*2, d=R(10,140);
+    m.position.set(Math.cos(a)*d, h/2+R(0,6), Math.sin(a)*d);
+    m.rotation.z=-0.16;                        // slant with the sun
+    m.userData={ph:rand()*6.28, base:R(.03,.1), ry:rand()*Math.PI};
+    rays.push(m); scene.add(m);
+  }
+}
+
+/* ---------------- floating motes ---------------- */
+let motes, moteVel;
+{
+  const N=500, pos=new Float32Array(N*3); moteVel=new Float32Array(N*3);
+  for(let i=0;i<N;i++){
+    pos[i*3]=R(-90,90); pos[i*3+1]=R(.3,26); pos[i*3+2]=R(-90,90);
+    moteVel[i*3]=R(-.1,.1); moteVel[i*3+1]=R(-.05,.02); moteVel[i*3+2]=R(-.1,.1);
+  }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute("position",new THREE.BufferAttribute(pos,3));
+  motes=new THREE.Points(g,new THREE.PointsMaterial({ map:moteTex, size:.32, transparent:true,
+    opacity:.55, blending:THREE.AdditiveBlending, depthWrite:false, sizeAttenuation:true }));
+  scene.add(motes);
+}
+
+/* ================================================================
+   OPTIONAL GAUSSIAN SPLAT — the real forest drops in here
+   ================================================================ */
+if (CONFIG.SPLAT_URL){
+  (async ()=>{
+    try{
+      const { SparkRenderer, SplatMesh } = await import("@sparkjsdev/spark");
+      const spark = new SparkRenderer({ renderer });
+      scene.add(spark);
+      const splat = new SplatMesh({ url: CONFIG.SPLAT_URL });
+      splat.position.set(...CONFIG.SPLAT_POSITION);
+      splat.rotation.set(...CONFIG.SPLAT_ROTATION);
+      splat.scale.setScalar(CONFIG.SPLAT_SCALE);
+      scene.add(splat);
+      if (!CONFIG.KEEP_PROCEDURAL_WITH_SPLAT){ forest.visible=false; ground.visible=false; }
+      toast("forest loaded");
+    }catch(e){ console.error("splat failed to load:",e); toast("splat failed to load — showing stylized forest"); }
+  })();
+}
+
+/* ================================================================
+   AUDIO — the album comes from the sky
+   ================================================================ */
+const AC = window.AudioContext||window.webkitAudioContext;
+let actx=null, master, musicGain, skyPanner, audioEl, mediaSrc, muted=false, trackIdx=-1;
+let padNodes=null;
+
+function makeReverb(ctx,seconds=2.8){
+  const rate=ctx.sampleRate, len=rate*seconds, ir=ctx.createBuffer(2,len,rate);
+  for(let ch=0;ch<2;ch++){ const d=ir.getChannelData(ch);
+    for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2.6);
+  }
+  const c=ctx.createConvolver(); c.buffer=ir; return c;
+}
+
+function initAudio(){
+  actx=new AC(); actx.resume?.();
+  master=actx.createGain(); master.gain.value=1; master.connect(actx.destination);
+
+  // The dry album mix goes straight to your ears, stereo untouched.
+  // Only the REVERB is spatialized — hung overhead with HRTF — so the
+  // "coming from the sky" feel never smears the actual mix.
+  musicGain=actx.createGain(); musicGain.gain.value=CONFIG.MUSIC_VOLUME;
+  musicGain.connect(master);
+
+  const verb=makeReverb(actx), verbGain=actx.createGain(); verbGain.gain.value=.22;
+  musicGain.connect(verbGain); verbGain.connect(verb);
+  skyPanner=actx.createPanner();
+  skyPanner.panningModel="HRTF"; skyPanner.distanceModel="inverse";
+  skyPanner.refDistance=24; skyPanner.rolloffFactor=.6;
+  verb.connect(skyPanner); skyPanner.connect(master);
+
+  // gentle wind bed
+  const wlen=actx.sampleRate*4, wbuf=actx.createBuffer(1,wlen,actx.sampleRate);
+  const wd=wbuf.getChannelData(0); let last=0;
+  for(let i=0;i<wlen;i++){ const w=Math.random()*2-1; last=(last+.02*w)/1.02; wd[i]=last*3.5; }
+  const wind=actx.createBufferSource(); wind.buffer=wbuf; wind.loop=true;
+  const wf=actx.createBiquadFilter(); wf.type="bandpass"; wf.frequency.value=420; wf.Q.value=.6;
+  const wg=actx.createGain(); wg.gain.value=.035;
+  const wlfo=actx.createOscillator(), wlg=actx.createGain();
+  wlfo.frequency.value=.07; wlg.gain.value=.02;
+  wlfo.connect(wlg); wlg.connect(wg.gain);
+  wind.connect(wf); wf.connect(wg); wg.connect(master);
+  wind.start(); wlfo.start();
+
+  if (CONFIG.TRACKS.length){
+    audioEl=new Audio(); audioEl.preload="auto";
+    audioEl.addEventListener("ended",()=>nextTrack());
+    if (location.protocol==="file:"){
+      // Opened by double-click: browsers silence local files routed through
+      // WebAudio (CORS taint), so play the element directly. The hosted
+      // version gets the full sky-reverb treatment.
+      audioEl.volume=CONFIG.MUSIC_VOLUME;
+    } else {
+      audioEl.crossOrigin="anonymous";
+      mediaSrc=actx.createMediaElementSource(audioEl);
+      mediaSrc.connect(musicGain);
+    }
+    nextTrack();
+  } else {
+    startPlaceholderPad(verbGain);
+    setNowPlaying("placeholder ambience","your album will play here");
+  }
+}
+
+function nextTrack(step=1){
+  if(!CONFIG.TRACKS.length) { toast("placeholder ambience — album not loaded yet"); return; }
+  trackIdx=(trackIdx+step+CONFIG.TRACKS.length)%CONFIG.TRACKS.length;
+  const t=CONFIG.TRACKS[trackIdx];
+  audioEl.src=t.url; audioEl.play().catch(()=>{});
+  setNowPlaying(t.title, CONFIG.ARTIST);
+}
+
+/* built-in ambience so the experience works before the album is dropped in */
+function startPlaceholderPad(verbSend){
+  const chords=[[220,277.18,329.63,415.3],[174.61,220,261.63,329.63],
+                [196,246.94,293.66,392],[164.81,207.65,246.94,329.63]];
+  let ci=0; padNodes=[];
+  const padBus=actx.createGain(); padBus.gain.value=.16;
+  const lp=actx.createBiquadFilter(); lp.type="lowpass"; lp.frequency.value=880; lp.Q.value=.4;
+  const lfo=actx.createOscillator(), lg=actx.createGain();
+  lfo.frequency.value=.05; lg.gain.value=320; lfo.connect(lg); lg.connect(lp.frequency); lfo.start();
+  padBus.connect(lp); lp.connect(musicGain);
+  function playChord(){
+    const now=actx.currentTime, freqs=chords[ci%chords.length]; ci++;
+    freqs.forEach((f,k)=>{
+      [0,1].forEach(d=>{
+        const o=actx.createOscillator(), g=actx.createGain();
+        o.type=k<2?"sine":"triangle"; o.frequency.value=f*(d?1.003:0.997);
+        g.gain.setValueAtTime(0,now);
+        g.gain.linearRampToValueAtTime(.12/(k+1),now+7);
+        g.gain.setValueAtTime(.12/(k+1),now+14);
+        g.gain.linearRampToValueAtTime(0,now+21);
+        o.connect(g); g.connect(padBus); o.start(now); o.stop(now+22);
+      });
+    });
+    padNodes.push(setTimeout(playChord,14000));
+  }
+  playChord();
+}
+
+/* ================================================================
+   CONTROLS
+   ================================================================ */
+let yaw=0, pitch=0, locked=false, entered=false;
+const keys={};
+const vel=new THREE.Vector3();
+const joy={active:false,id:null,ox:0,oy:0,x:0,y:0};
+let lookTouch={id:null,lx:0,ly:0};
+
+addEventListener("keydown",e=>{
+  keys[e.code]=true;
+  if(e.code==="KeyN") nextTrack();
+  if(e.code==="KeyM") toggleMute();
+});
+addEventListener("keyup",e=>keys[e.code]=false);
+
+document.addEventListener("mousemove",e=>{
+  if(!locked) return;
+  // Chrome fires a huge bogus delta when the lock engages — ignore spikes
+  if(Math.abs(e.movementX)>200||Math.abs(e.movementY)>200) return;
+  yaw-=e.movementX*0.0022; pitch-=e.movementY*0.0022;
+  pitch=Math.max(-1.45,Math.min(1.45,pitch));
+});
+document.addEventListener("pointerlockchange",()=>{
+  locked=document.pointerLockElement===renderer.domElement;
+  if(entered && !locked && !isTouch) pauseUI(true);
+});
+renderer.domElement.addEventListener("click",()=>{
+  if(entered && !isTouch && !locked) lock();
+});
+document.getElementById("pause").addEventListener("click",()=>{ pauseUI(false); if(!isTouch) lock(); });
+function lock(){ renderer.domElement.requestPointerLock?.(); }
+function pauseUI(on){ document.getElementById("pause").classList.toggle("on",on); }
+
+/* --- touch: left thumb = walk, right thumb = look --- */
+const stick=document.getElementById("stick"), knob=document.getElementById("knob");
+addEventListener("touchstart",e=>{
+  if(!entered) return;
+  for(const t of e.changedTouches){
+    if(t.clientX<innerWidth*.45 && !joy.active){
+      joy.active=true; joy.id=t.identifier; joy.ox=t.clientX; joy.oy=t.clientY; joy.x=joy.y=0;
+      stick.style.display="block";
+      stick.style.left=(t.clientX-55)+"px"; stick.style.top=(t.clientY-55)+"px";
+    } else if(lookTouch.id===null){
+      lookTouch.id=t.identifier; lookTouch.lx=t.clientX; lookTouch.ly=t.clientY;
+    }
+  }
+},{passive:true});
+addEventListener("touchmove",e=>{
+  for(const t of e.changedTouches){
+    if(joy.active && t.identifier===joy.id){
+      let dx=t.clientX-joy.ox, dy=t.clientY-joy.oy;
+      const m=Math.hypot(dx,dy), max=44;
+      if(m>max){dx*=max/m; dy*=max/m;}
+      joy.x=dx/max; joy.y=dy/max;
+      knob.style.transform=`translate(${dx}px,${dy}px)`;
+    } else if(t.identifier===lookTouch.id){
+      yaw-=(t.clientX-lookTouch.lx)*0.005; pitch-=(t.clientY-lookTouch.ly)*0.005;
+      pitch=Math.max(-1.45,Math.min(1.45,pitch));
+      lookTouch.lx=t.clientX; lookTouch.ly=t.clientY;
+    }
+  }
+},{passive:true});
+addEventListener("touchend",e=>{
+  for(const t of e.changedTouches){
+    if(t.identifier===joy.id){ joy.active=false; joy.id=null; joy.x=joy.y=0;
+      stick.style.display="none"; knob.style.transform=""; }
+    if(t.identifier===lookTouch.id) lookTouch.id=null;
+  }
+});
+
+/* ================================================================
+   UI WIRING
+   ================================================================ */
+const npEl=document.getElementById("nowplaying");
+let npTimer;
+function setNowPlaying(title,sub){
+  npEl.querySelector(".t").textContent=title;
+  npEl.querySelector(".a").textContent=sub;
+  npEl.classList.add("fresh");
+  clearTimeout(npTimer); npTimer=setTimeout(()=>npEl.classList.remove("fresh"),5000);
+}
+let toastTimer;
+function toast(msg){
+  const el=document.getElementById("toast");
+  el.textContent=msg; el.classList.add("on");
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.classList.remove("on"),3000);
+}
+function toggleMute(){
+  if(!master) return;
+  muted=!muted;
+  master.gain.linearRampToValueAtTime(muted?0:1,actx.currentTime+.3);
+  if(audioEl) audioEl.muted=muted;   // covers the direct (file://) path too
+  document.getElementById("btn-mute").textContent=muted?"✕":"♪";
+  toast(muted?"muted":"sound on");
+}
+document.getElementById("btn-next").addEventListener("click",e=>{e.stopPropagation();nextTrack();});
+document.getElementById("btn-mute").addEventListener("click",e=>{e.stopPropagation();toggleMute();});
+document.getElementById("btn-full").addEventListener("click",e=>{
+  e.stopPropagation();
+  document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen?.();
+});
+
+document.getElementById("enter").addEventListener("click",()=>{
+  entered=true;
+  document.getElementById("landing").classList.add("gone");
+  document.getElementById("hud").classList.add("on");
+  initAudio();
+  if(!isTouch) lock();
+});
+
+/* ================================================================
+   MAIN LOOP
+   ================================================================ */
+const clock=new THREE.Clock();
+const fwd=new THREE.Vector3(), right=new THREE.Vector3();
+
+renderer.setAnimationLoop(()=>{
+  const dt=Math.min(clock.getDelta(),0.05), t=clock.elapsedTime;
+
+  /* movement */
+  let ix=0,iz=0;
+  if(keys.KeyW||keys.ArrowUp)iz+=1; if(keys.KeyS||keys.ArrowDown)iz-=1;
+  if(keys.KeyA||keys.ArrowLeft)ix-=1; if(keys.KeyD||keys.ArrowRight)ix+=1;
+  if(joy.active){ ix+=joy.x; iz-=joy.y; }
+  const run=(keys.ShiftLeft||keys.ShiftRight)?7.2:3.9;
+  fwd.set(-Math.sin(yaw),0,-Math.cos(yaw)); right.set(-fwd.z,0,fwd.x);
+  const acc=new THREE.Vector3().addScaledVector(fwd,iz).addScaledVector(right,ix);
+  if(acc.lengthSq()>1)acc.normalize();
+  vel.lerp(acc.multiplyScalar(run),1-Math.pow(0.0018,dt));
+  camera.position.addScaledVector(vel,dt);
+
+  /* collisions: trees + soft boundary */
+  for(const tr of trees){
+    const dx=camera.position.x-tr.x, dz=camera.position.z-tr.z;
+    const rr=(tr.r||1.5)+0.7, d2=dx*dx+dz*dz;
+    if(d2<rr*rr && d2>1e-6){ const d=Math.sqrt(d2);
+      camera.position.x=tr.x+dx/d*rr; camera.position.z=tr.z+dz/d*rr; }
+  }
+  const bd=Math.hypot(camera.position.x,camera.position.z);
+  if(bd>CONFIG.BOUNDS){ const s=CONFIG.BOUNDS/bd;
+    camera.position.x*=s; camera.position.z*=s; }
+  camera.position.y=EYE;
+
+  camera.quaternion.setFromEuler(new THREE.Euler(pitch,yaw,0,"YXZ"));
+  sky.position.copy(camera.position);
+
+  /* drifting dust */
+  if(motes){
+    const p=motes.geometry.attributes.position.array;
+    for(let i=0;i<p.length;i+=3){
+      p[i]+=moteVel[i]*dt; p[i+1]+=moteVel[i+1]*dt+Math.sin(t*.5+i)*0.0006; p[i+2]+=moteVel[i+2]*dt;
+      if(p[i+1]<0.2)p[i+1]=26;
+      if(Math.abs(p[i]-camera.position.x)>95)p[i]=camera.position.x+R(-90,90);
+      if(Math.abs(p[i+2]-camera.position.z)>95)p[i+2]=camera.position.z+R(-90,90);
+    }
+    motes.geometry.attributes.position.needsUpdate=true;
+  }
+
+  /* breathing god rays */
+  for(const r of rays) r.material.opacity=r.userData.base*(0.65+0.35*Math.sin(t*.3+r.userData.ph));
+
+  /* audio follows you; the song hangs overhead */
+  if(actx){
+    const l=actx.listener, p=camera.position;
+    const f=new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
+    const u=new THREE.Vector3(0,1,0).applyQuaternion(camera.quaternion);
+    if(l.positionX){
+      l.positionX.value=p.x; l.positionY.value=p.y; l.positionZ.value=p.z;
+      l.forwardX.value=f.x; l.forwardY.value=f.y; l.forwardZ.value=f.z;
+      l.upX.value=u.x; l.upY.value=u.y; l.upZ.value=u.z;
+    } else { l.setPosition(p.x,p.y,p.z); l.setOrientation(f.x,f.y,f.z,u.x,u.y,u.z); }
+    if(skyPanner){
+      if(skyPanner.positionX){ skyPanner.positionX.value=p.x; skyPanner.positionY.value=p.y+24; skyPanner.positionZ.value=p.z; }
+      else skyPanner.setPosition(p.x,p.y+24,p.z);
+    }
+  }
+
+  renderer.render(scene,camera);
+});
+
+addEventListener("resize",()=>{
+  camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+
+// dev/test hook
+window.__forest = { get audio(){return audioEl}, get ctx(){return actx}, get pos(){return camera.position} };
+</script>
+</body>
+</html>
